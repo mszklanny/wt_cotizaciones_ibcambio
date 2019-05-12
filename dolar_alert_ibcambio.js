@@ -14,7 +14,7 @@ const nodemailer = require('nodemailer');
 * - clear_notification: set it to 1 to clear the "daily notification sent" flag.
 */
 module.exports = function(context, cb) {
-  function getStorageData(callback) {
+  function withStorageData(callback) {
     context.storage.get(function (error, data){
       if (error) {
         return cb(error, null);
@@ -22,7 +22,7 @@ module.exports = function(context, cb) {
       return callback(data);
     });
   }
-  function getToken(storage, callback) {
+  function withToken(storage, callback) {
     request.post('https://api.ibcambio.com/api/gettoken/', {
         json: {
           usuario: context.secrets.usuario,
@@ -62,7 +62,7 @@ module.exports = function(context, cb) {
     });
   }
 
-  function getCotizaciones (storage, token) {
+  function checkCotizaciones(storage, token) {
     request.get('https://api.ibcambio.com/api/cotizaciones/', {headers: token}, (error, res, body) => {
         if (error) {
           return cb(error, null);
@@ -77,7 +77,7 @@ module.exports = function(context, cb) {
     });
   }
 
-  getStorageData(function (storage){
+  withStorageData(function (storage){
     if (context.query.venta) {
       storage.venta = context.query.venta;
       context.storage.set(storage);
@@ -92,6 +92,6 @@ module.exports = function(context, cb) {
     {
       return cb(null, "Nothing done. The daily notification was already sent because the threshold ($" + storage.venta + ") was reached today. To reset the notification, call with ?clear_notification=1. To set a new threshold, provide the parameter 'venta'.");
     }
-    return getToken(storage, getCotizaciones);
+    return withToken(storage, checkCotizaciones);
   });
 };
