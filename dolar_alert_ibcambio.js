@@ -14,8 +14,6 @@ const nodemailer = require('nodemailer');
 * - clear_notification: set it to 1 to clear the "daily notification sent" flag.
 */
 module.exports = function(context, cb) {
-  var request_retries = 1;
-  
   function withStorageData(callback) {
     context.storage.get(function (error, data){
       if (error) {
