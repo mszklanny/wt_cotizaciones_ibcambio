@@ -7,13 +7,15 @@ const nodemailer = require('nodemailer');
 * Send email whenever the dolar rate (48hs) from IBCambio.com goes below the threshold.
 * In your mobile, configure an email filter and set a custom notification for it.
 * Up to one email per day is sent.
-* CRON settings: 1-59 10-17 * * 1-5
+* CRON settings: 1-59 10-16 * * 1-5
 *
 * Params
 * - venta: set the sell threshold. If the rate goes below this value, the alert will be triggered.
 * - clear_notification: set it to 1 to clear the "daily notification sent" flag.
 */
 module.exports = function(context, cb) {
+  var request_retries = 1;
+  
   function withStorageData(callback) {
     context.storage.get(function (error, data){
       if (error) {
@@ -23,6 +25,10 @@ module.exports = function(context, cb) {
     });
   }
   function withToken(storage, callback) {
+    if (storage.headers && storage.headers.token) {
+      console.log("Reusing existing token.");
+      return callback(storage);
+    }
     request.post('https://api.ibcambio.com/api/gettoken/', {
         json: {
           usuario: context.secrets.usuario,
@@ -32,7 +38,10 @@ module.exports = function(context, cb) {
         if (error) {
           return cb(error, null);
         }
-      return callback(storage, body);
+      storage.headers = body;
+      context.storage.set(storage);
+      console.log("Obtained a new token.");
+      return callback(storage);
       });
   }
   function sendEmail(cotizacion_venta, storage) {
@@ -62,12 +71,23 @@ module.exports = function(context, cb) {
     });
   }
 
-  function checkCotizaciones(storage, token) {
-    request.get('https://api.ibcambio.com/api/cotizaciones/', {headers: token}, (error, res, body) => {
+  function clearToken(storage){
+    console.log("Error in token. Clearing storage.");
+    delete storage.headers.token;
+    context.storage.set(storage);
+  }
+  
+  function checkCotizaciones(storage) {
+    request.get('https://api.ibcambio.com/api/cotizaciones/', {headers: storage.headers}, (error, res, body) => {
         if (error) {
           return cb(error, null);
         }
         const json = JSON.parse(body);
+        if (json.error) {
+          clearToken(storage);
+          return cb(body.error, null);
+        }
+        
         var cotizacion = json.Cotizaciones.find(function(element) {return element.plazo === '48hs.' && element.Moneda === 'Dolar Estadounidense';});
         if (json.Habil && cotizacion.Venta <= storage.venta) {
           sendEmail(cotizacion.Venta, storage);
