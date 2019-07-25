@@ -14,87 +14,6 @@ const nodemailer = require('nodemailer');
 * - clear_notification: set it to 1 to clear the "daily notification sent" flag.
 */
 module.exports = function(context, cb) {
-  function withStorageData(callback) {
-    context.storage.get(function (error, data){
-      if (error) {
-        return cb(error, null);
-      }
-      return callback(data);
-    });
-  }
-  function withToken(storage, callback) {
-    if (storage.headers && storage.headers.token) {
-      console.log("Reusing existing token.");
-      return callback(storage);
-    }
-    request.post('https://api.ibcambio.com/api/gettoken/', {
-        json: {
-          usuario: context.secrets.usuario,
-          contrasena: context.secrets.contrasena
-        }
-      }, (error, res, body) => {
-        if (error) {
-          return cb(error, null);
-        }
-      storage.headers = body;
-      context.storage.set(storage);
-      console.log("Obtained a new token.");
-      return callback(storage);
-      });
-  }
-  function sendEmail(cotizacion_venta, storage) {
-    var transporter = nodemailer.createTransport({
-      service: 'gmail',
-      auth: {
-        user: context.secrets.emailuser,
-        pass: context.secrets.emailpass
-      }
-    });
-
-    var mailOptions = {
-      from: context.secrets.emailuser,
-      to: context.secrets.emailto,
-      subject: '$' + cotizacion_venta + ' - ALERTA DE COMPRA DE DOLARES',
-      text: 'https://ibcambio.com'
-    };
-
-    transporter.sendMail(mailOptions, function(erroremail, info){
-      if (erroremail) {
-        return cb(erroremail, info);
-      }
-
-      storage.last_notification = new Date().toDateString();
-      context.storage.set(storage);
-      return cb(null, "Email sent because the threshold ($" + storage.venta + ") was reached. Buy USD now at $" + cotizacion_venta + ".");
-    });
-  }
-
-  function clearToken(storage){
-    console.log("Error in token. Clearing storage.");
-    delete storage.headers.token;
-    context.storage.set(storage);
-  }
-  
-  function checkCotizaciones(storage) {
-    request.get('https://api.ibcambio.com/api/cotizaciones/', {headers: storage.headers}, (error, res, body) => {
-        if (error) {
-          return cb(error, null);
-        }
-        const json = JSON.parse(body);
-        if (json.error) {
-          clearToken(storage);
-          return cb(body.error, null);
-        }
-        
-        var cotizacion = json.Cotizaciones.find(function(element) {return element.plazo === '48hs.' && element.Moneda === 'Dolar Estadounidense';});
-        if (json.Habil && cotizacion.Venta <= storage.venta) {
-          sendEmail(cotizacion.Venta, storage);
-        } else {
-          return cb(null, "Nothing done. The current rate ($" + cotizacion.Venta + ") has not reached the threshold ($" + storage.venta + ") or the market is closed at the moment (Habil = " + json.Habil + "). Last notification sent on: " + (typeof storage.last_notification !== 'undefined' ? storage.last_notification : "(not sent)") + ". To reset the notification, call with ?clear_notification=1. To set a new threshold, provide the parameter 'venta'.");
-        }
-    });
-  }
-
   withStorageData(function (storage){
     if (context.query.venta) {
       storage.venta = context.query.venta;
@@ -113,3 +32,86 @@ module.exports = function(context, cb) {
     return withToken(storage, checkCotizaciones);
   });
 };
+
+function withStorageData(callback) {
+  context.storage.get(function (error, data){
+    if (error) {
+      return cb(error, null);
+    }
+    return callback(data);
+  });
+}
+
+function withToken(storage, callback) {
+  if (storage.headers && storage.headers.token) {
+    console.log("Reusing existing token.");
+    return callback(storage);
+  }
+  request.post('https://api.ibcambio.com/api/gettoken/', {
+      json: {
+        usuario: context.secrets.usuario,
+        contrasena: context.secrets.contrasena
+      }
+    }, (error, res, body) => {
+      if (error) {
+        return cb(error, null);
+      }
+    storage.headers = body;
+    context.storage.set(storage);
+    console.log("Obtained a new token.");
+    return callback(storage);
+    });
+}
+
+function sendEmail(cotizacion_venta, storage) {
+  var transporter = nodemailer.createTransport({
+    service: 'gmail',
+    auth: {
+      user: context.secrets.emailuser,
+      pass: context.secrets.emailpass
+    }
+  });
+
+  var mailOptions = {
+    from: context.secrets.emailuser,
+    to: context.secrets.emailto,
+    subject: '$' + cotizacion_venta + ' - ALERTA DE COMPRA DE DOLARES',
+    text: 'https://ibcambio.com'
+  };
+
+  transporter.sendMail(mailOptions, function(erroremail, info){
+    if (erroremail) {
+      return cb(erroremail, info);
+    }
+
+    storage.last_notification = new Date().toDateString();
+    context.storage.set(storage);
+    return cb(null, "Email sent because the threshold ($" + storage.venta + ") was reached. Buy USD now at $" + cotizacion_venta + ".");
+  });
+}
+
+function clearToken(storage){
+  console.log("Error in token. Clearing storage.");
+  delete storage.headers.token;
+  context.storage.set(storage);
+}
+
+function checkCotizaciones(storage) {
+  request.get('https://api.ibcambio.com/api/cotizaciones/', {headers: storage.headers}, (error, res, body) => {
+      if (error) {
+        return cb(error, null);
+      }
+      const json = JSON.parse(body);
+      if (json.error) {
+        clearToken(storage);
+        return cb(body.error, null);
+      }
+
+      var cotizacion = json.Cotizaciones.find(function(element) {return element.plazo === '48hs.' && element.Moneda === 'Dolar Estadounidense';});
+      if (json.Habil && cotizacion.Venta <= storage.venta) {
+        sendEmail(cotizacion.Venta, storage);
+      } else {
+        return cb(null, "Nothing done. The current rate ($" + cotizacion.Venta + ") has not reached the threshold ($" + storage.venta + ") or the market is closed at the moment (Habil = " + json.Habil + "). Last notification sent on: " + (typeof storage.last_notification !== 'undefined' ? storage.last_notification : "(not sent)") + ". To reset the notification, call with ?clear_notification=1. To set a new threshold, provide the parameter 'venta'.");
+      }
+  });
+}
